@@ -578,8 +578,9 @@ Blockg.lm <- function(x,y,
           }
         }else{
           g_gam <- g[as.logical(gam)]
-          d_i <- 2*(C[count, ]%*% (1/sqrt(g_gam)) - 
-                                    C[count,count]*1/sqrt(g_gam[count]))
+          d_i <- 2*(C[count,-count]%*%(1/sqrt(g_gam[-count])))
+          # d_i <- 2*(C[count, ]%*% (1/sqrt(g_gam)) - 
+          #                           C[count,count]*1/sqrt(g_gam[count]))
           
           ### Update parts to have a hyper g section
           if(hyper.prior=="Inv-gamma"){
