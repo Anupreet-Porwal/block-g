@@ -87,7 +87,7 @@ to_right_Matrix <- function(x) {
   }
 }
 
-log_marginal <- function(x,y,g,gam){
+log_marginal <- function(x,y,g,gam,hyper.prior){
   
   n <- length(y)
   p <- ncol(x)
@@ -106,20 +106,25 @@ log_marginal <- function(x,y,g,gam){
     xtx <- t(x)%*% x
     xty <- t(x)%*% y
     
-    ghalf.inv <- diag(1/sqrt(g),nrow = pgam,ncol=pgam)
-    # print(paste("min:",min(g)))
-    # print(paste("max:",max(g)))
-    gxtxg <- ghalf.inv %*% xtx %*% ghalf.inv
-    gxtxg <- (gxtxg+t(gxtxg))/2
-    # temp <- solve(xtx+gxtxg)
-    # print(isSymmetric(temp))
-    # B_parts <- if (!is.list(gxtxg)) list(gxtxg) else gxtxg
-    # B_parts <- lapply(B_parts, to_right_Matrix)
-    # print(gxtxg)
-    # print("Done this calculation")
-    mat <- WoodburyMatrix(A=diag(n), X= x , B=gxtxg)
-    # ghalf <- diag(sqrt(g),nrow = pgam,ncol=pgam)
-    # mat <- WoodburyMatrix(A=diag(n), X= x %*% ghalf, B=xtx)
+    if(hyper.prior=="beta-prime-MG"){
+      ghalf <- diag(sqrt(g),nrow = pgam,ncol=pgam)
+      xghalf <- x %*% ghalf
+      mat <- WoodburyMatrix(A=diag(n), X= xghalf, B=xtx)
+    }else{
+      ghalf.inv <- diag(1/sqrt(g),nrow = pgam,ncol=pgam)
+      # print(paste("min:",min(g)))
+      # print(paste("max:",max(g)))
+      gxtxg <- ghalf.inv %*% xtx %*% ghalf.inv
+      gxtxg <- (gxtxg+t(gxtxg))/2
+      # temp <- solve(xtx+gxtxg)
+      # print(isSymmetric(temp))
+      # B_parts <- if (!is.list(gxtxg)) list(gxtxg) else gxtxg
+      # B_parts <- lapply(B_parts, to_right_Matrix)
+      # print(gxtxg)
+      # print("Done this calculation")
+      mat <- WoodburyMatrix(A=diag(n), X= x , B=gxtxg)
+      
+    }
     
     # g_025 <- diag((g)^{0.25},nrow = pgam,ncol=pgam)
     # g_025_inv <- diag((g)^{-0.25},nrow = pgam,ncol=pgam)
@@ -378,9 +383,9 @@ Blockg.lm <- function(x,y,
     gam.prop <- proposal.gamma(gam)
     
     if(sum(gam.prop)< n-1){
-      logmarg.prop.obj <- log_marginal(x,y,g,gam.prop)
+      logmarg.prop.obj <- log_marginal(x,y,g,gam.prop,hyper.prior=hyper.prior)
     }
-    logmarg.curr.obj <- log_marginal(x,y,g, gam)
+    logmarg.curr.obj <- log_marginal(x,y,g, gam,hyper.prior=hyper.prior)
     # Calculate acceptance probability for (gam.prop,delta.cand)
     
     if(p==2){
