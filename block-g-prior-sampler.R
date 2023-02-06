@@ -625,23 +625,29 @@ Blockg.lm <- function(x,y,
             }
             #print(paste("Cii:",C[count,count]))
             #print(paste("di:",d_i))
-            ht_i <- (1+t_i)^{-(a+b_param+2)}#{-(n-pgam-1)/2}
-            u_i <- runif(1,0,ht_i)
-            truncation <- C[count,count]*(u_i^{-1/(a+b_param+2)}-1)#(u_i^{-2/(n-pgam-1)}-1)
-            zeta <- d_i/(2*sqrt(C[count,count]))
-            if(abs(zeta)>10^5 | is.nan(zeta)){
-              print(pgam)
-              print(count)
-              print(paste("g_i:",ggam[count]))
-              print(paste("b_i:",bvec[count]))
-              print(paste("xtxii:",xtx[count,count]))
-              print(paste("Cii:",C[count,count]))
-              print(paste("di:", d_i))
+            if(C[count,count]==0 & d_i==0){
+              bp.tran <- rbeta(1,a+3/2,b_param+1/2)
+              g[ind] <- exp(log(bp.tran)-log(1-bp.tran))
+            }else{
+              ht_i <- (1+t_i)^{-(a+b_param+2)}#{-(n-pgam-1)/2}
+              u_i <- runif(1,0,ht_i)
+              truncation <- C[count,count]*(u_i^{-1/(a+b_param+2)}-1)#(u_i^{-2/(n-pgam-1)}-1)
+              zeta <- d_i/(2*sqrt(C[count,count]))
+              if(abs(zeta)>10^5 | is.nan(zeta)){
+                print(pgam)
+                print(count)
+                print(paste("g_i:",ggam[count]))
+                print(paste("b_i:",bvec[count]))
+                print(paste("xtxii:",xtx[count,count]))
+                print(paste("Cii:",C[count,count]))
+                print(paste("di:", d_i))
+              }
+              z_i <- ext_gamma_sampler(alpha = a+3/2,gam_param = zeta,
+                                       truncation = truncation)
+              g_inv <- z_i/C[count,count]
+              g[ind] <- 1/g_inv
             }
-            z_i <- ext_gamma_sampler(alpha = a+3/2,gam_param = zeta,
-                                     truncation = truncation)
-            g_inv <- z_i/C[count,count]
-            g[ind] <- 1/g_inv
+            
           }
           
           # end update 
