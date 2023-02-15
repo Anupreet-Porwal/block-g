@@ -427,8 +427,8 @@ Blockg.lm <- function(x,y,
     
     
     #print(oj.den.log)
-    a.gam.prob <- min(as.numeric(exp(oj.num.log-oj.den.log)),1)
-    if(u.gam<=a.gam.prob){
+    loga.gam.prob <- min(as.numeric(oj.num.log-oj.den.log),0)
+    if(log(u.gam)<=loga.gam.prob){
       gam <- gam.prop
       xtx <- logmarg.prop.obj$xtx
       xty <- logmarg.prop.obj$xty
