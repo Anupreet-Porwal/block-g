@@ -202,17 +202,19 @@ normal_rejection_sampler <- function(alpha,gam_param,truncation=NULL){
   }
   
   if(is.null(truncation)){
-    x <- rtruncnorm(1,m,1/sqrt(2),a=0)
+    x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0)
     u <- runif(1)
     while ((2*alpha-1)*log(m)+ log(u) >(2*alpha-1)*log(x)-2*(m+gam_param)*(x-m)) {
-      x <- rtruncnorm(1,m,1/sqrt(2),a=0)
+      x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0)
       u <- runif(1)
     }
   }else{
     x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0, b=sqrt(truncation))
     u <- runif(1)
-    
-    while ((2*alpha-1)*log(m)+ log(u) > (2*alpha-1)*log(x)-2*(m+gam_param)*(x-m)) {
+    #print(paste("sqrt-truncation:",sqrt(truncation)))
+    #print(paste("m:",m))
+    #print(paste("x:",x))
+    while ((2*alpha-1)*log(m)+ log(u) > ifelse(is.nan(log(x))|x==0, -Inf, (2*alpha-1)*log(x)-2*(m+gam_param)*(x-m))) {
       x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0, b=sqrt(truncation))
       u <- runif(1)
       #print(x)
@@ -259,7 +261,9 @@ ext_gamma_sampler <- function(alpha, gam_param,truncation=NULL){
     C <- 0
   }
   # C <- gam_param/sqrt(alpha)
-  
+  if(abs(gam_param)<10^{-3}|abs(gam_param)>10^3){
+    print(paste("gam_param:", gam_param))
+  }
   if(C<= -0.7){
     z <- normal_rejection_sampler(alpha,gam_param,truncation)
   }else if (-0.7 < C & C < 0.7){
@@ -491,24 +495,30 @@ Blockg.lm <- function(x,y,
         b.lik <- as.numeric((t(b) %*% xtx %*% b)/(2*sigma2))
       }
       if(hyper.prior=="Inv-gamma"){
-        g[which(gam==0)] <- rinvgamma(1,a1,a2)
-        g[which(gam)==1] <- 1/rgamma(1,a1+pgam/2, a2+ b.lik)
+        #g[which(gam==0)] <- rinvgamma(1,a1,a2)
+        #g[which(gam)==1] <- 1/rgamma(1,a1+pgam/2, a2+ b.lik)
+        g <- rep(1/rgamma(1,a1+pgam/2, a2+ b.lik),p)
       }else if(hyper.prior=="hyper-g"){
-        g[which(gam==0)] <- rhyperg(1,a)
-        if(sum(gam)!=0){
+        #g[which(gam==0)] <- rhyperg(1,a)
+        if(sum(gam)==0){
+          g <- rep(rhyperg(1,a),p)
+        }else if(sum(gam)!=0){
           t_i <- 1/g.old
           ht_i <- (1+t_i)^{-a/2}
           u_i <- runif(1,0,ht_i)
           truncation <- (u_i^{-2/a}-1)
           g.new.inv <- rtgamma(1, (a+pgam-2)/2, b.lik,
                                truncation = truncation)
-          g[which(gam==1)] <- 1/g.new.inv
+          g <- rep(1/g.new.inv,p)
+          #g[which(gam==1)] <- 1/g.new.inv
           g.old <- 1/g.new.inv
           
         }
       }else if(hyper.prior=="hyper-g-n"){
-        g[which(gam==0)] <- rhypergn(1,a,n)
-        if(sum(gam)!=0){
+        #g[which(gam==0)] <- rhypergn(1,a,n)
+        if(sum(gam)==0){
+          g <- rep(rhypergn(1,a,n),p)
+        }else if(sum(gam)!=0){
           t_i <- 1/g.old
           # Slice sampling approach
           ht_i <- (1+n*t_i)^{-a/2}
@@ -516,38 +526,47 @@ Blockg.lm <- function(x,y,
           truncation <- 1/n*(u_i^{-2/a}-1)
           g.new.inv <- rtgamma(1, (a+pgam-2)/2, b.lik,
                                truncation = truncation)
-          g[which(gam==1)] <- 1/g.new.inv
+          g <- rep(1/g.new.inv,p)
+          #g[which(gam==1)] <- 1/g.new.inv
           g.old <- 1/g.new.inv
           
         }
       }else if(hyper.prior=="beta-prime-MG"){
         b_param <- (n-pgam-5)/2 -a
         t_i <- 1/g.old
-        bp.tran <- rbeta(1,a+1,b_param+1)
-        g[which(gam==0)] <- exp(log(bp.tran)-log(1-bp.tran))#rbetapr(1, a+1, b_param+1)
-        if(sum(gam)!=0){
+        #bp.tran <- rbeta(1,a+1,b_param+1)
+        #g[which(gam==0)] <- exp(log(bp.tran)-log(1-bp.tran))#rbetapr(1, a+1, b_param+1)
+        if(sum(gam)==0){
+          bp.tran <- rbeta(1,a+1,b_param+1)
+          g <- rep(exp(log(bp.tran)-log(1-bp.tran)),p)#rbetapr(1, a+1, b_param+1)
+        }else if(sum(gam)!=0){
           ht_i <- (1+t_i)^{-(a+b_param+2)}#{-(n-pgam-1)/2}
           u_i <- runif(1,0,ht_i)
           truncation <- (u_i^{-1/(a+b_param+2)}-1)#(u_i^{-2/(n-pgam-1)}-1)
           g.new.inv <- rtgamma(1, a+(pgam+2)/2, b.lik,
                                truncation = truncation)
-          g[which(gam==1)] <- 1/g.new.inv
+          g <- rep(1/g.new.inv,p)
+          #g[which(gam==1)] <- 1/g.new.inv
           g.old <- 1/g.new.inv
           
         }
       }else if(hyper.prior=="beta-prime"){
         b_param <- b_param
         t_i <- 1/g.old
-        bp.tran <- rbeta(1,a+1,b_param+1)
-        g[which(gam==0)] <- exp(log(bp.tran)-log(1-bp.tran))#rbetapr(1, a+1, b_param+1)
+        #bp.tran <- rbeta(1,a+1,b_param+1)
+        #g[which(gam==0)] <- exp(log(bp.tran)-log(1-bp.tran))#rbetapr(1, a+1, b_param+1)
         #g[which(gam==0)] <- rbetapr(1, a+1, b_param+1)
-        if(sum(gam)!=0){
+        if(sum(gam)==0){
+          bp.tran <- rbeta(1,a+1,b_param+1)
+          g <- rep(exp(log(bp.tran)-log(1-bp.tran)),p)#rbetapr(1, a+1, b_param+1)
+        }else if(sum(gam)!=0){
           ht_i <- (1+t_i)^{-(a+b_param+2)}#{-(n-pgam-1)/2}
           u_i <- runif(1,0,ht_i)
           truncation <- (u_i^{-1/(a+b_param+2)}-1)#(u_i^{-2/(n-pgam-1)}-1)
           g.new.inv <- rtgamma(1, a+(pgam+2)/2, b.lik,
                                truncation = truncation)
-          g[which(gam==1)] <- 1/g.new.inv
+          g <- rep(1/g.new.inv,p)
+          #g[which(gam==1)] <- 1/g.new.inv
           g.old <- 1/g.new.inv
         }
       }
@@ -663,20 +682,22 @@ Blockg.lm <- function(x,y,
     end_time <- Sys.time()
     timemat[t,4] <- end_time-start_time
     
-    betastore=rep(0,p+1)
+    betastore=rep(0,p)
     #Save results post burn-in
     if(t > burn && (t - burn) %% thinning == 0){
       rr  <- floor((t - burn) / thinning)
       GammaSave[rr, ] = gam
-      count3=1
-      gam.withintercept <- c(1,gam)
-      betastore[1] <- alpha
-      for (k in 2:(p+1)){
-        if(gam.withintercept[k]==1){
-          betastore[k]= b[count3]
-          count3=count3+1
-        }
-      }
+      #count3=1
+      # gam.withintercept <- c(1,gam)
+      # betastore[1] <- alpha
+      # for (k in 2:(p+1)){
+      #   if(gam.withintercept[k]==1){
+      #     betastore[k]= b[count3]
+      #     count3=count3+1
+      #   }
+      # }
+      betastore[which(gam==1)] <- b
+      betastore <- c(alpha,betastore)
       BetaSave[rr, ] = betastore
       Sigma2Save[rr, ] <- sigma2
       logmargSave[rr, ] <- logmarg
