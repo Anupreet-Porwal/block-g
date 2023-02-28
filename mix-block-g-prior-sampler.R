@@ -3,8 +3,58 @@ library(WoodburyMatrix)
 library(mvtnorm)
 library(truncnorm)
 library(extraDistr)
+library(dirichletprocess)
 resample <- function(x, ...) x[sample.int(length(x), ...)]
 
+cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r){
+  var_in_mod <- which(gam==1)
+  ind.var <- var_in_mod[r]
+  g[ind.var] <- g_K[k]
+  ggam <- g[as.logical(gam)]
+  #print(dim(diag(1/sqrt(ggam))))
+  b_sqrtg <- t(b) %*% diag(1/sqrt(ggam),nrow = length(ggam),ncol = length(ggam))
+  # CHECK THIS EQUATION IS CORRECT
+  #print(dim(xtx[r,-r]))
+  #print(dim(b_sqrtg[-r]))
+  d_ind <- 2* (xtx[r,-r] %*% b_sqrtg[1,-r])*b[r]/sqrt(ggam[r]) + 
+    xtx[r,r] * b[r]^2/ggam[r]
+  prop_llik <- -0.5*log(ggam[r]) - d_ind/(2*sigma2)
+  
+  return(prop_llik)
+}
+
+
+# Taken from: https://github.com/IvanUkhov/blog/blob/main/_scripts/2021-01-25-dirichlet-process/common.R
+# blog post: https://blog.ivanukhov.com/2021/01/25/dirichlet-process.html
+count_subjects <- function(m, k) {
+  n <- rep(0, m)
+  k <- as.data.frame(table(k))
+  n[as.numeric(levels(k[ , 1]))[k[ , 1]]] <- k[ , 2]
+  n
+}
+
+stick_break <- function(l, alpha, beta,log=TRUE) {
+  q <- rbeta(l, shape1 = alpha, shape2 = beta)
+  q <- c(head(q, -1), 1)
+  if(log==TRUE){
+    p = log(q) + c(0, cumsum(log(1 - head(q, -1))))
+  }else{
+    p = q * c(1, cumprod(1 - head(q, -1)))
+  }
+  return(list(p=p,q=q))
+}
+
+sample_Plambda_prior <- function(l, alpha0 = 1, beta0 = 1) {
+  rgamma(l, alpha0, beta0)
+}
+
+sample_Plambda_posterior <- function(l, q, alpha0 = 1, beta0 = 1) {
+  sample_Plambda_prior(
+    l = l,
+    alpha0 = alpha0 + length(q) - 1,
+    beta0 = beta0 - sum(log(head(q, -1)))
+  )
+}
 # Taken from here :  https://github.com/willtownes/mit6882/blob/master/will/speed_tests.Rmd
 # Some discussion here:  http://www.statsathome.com/2018/10/19/sampling-from-multivariate-normal-precision-and-covariance-parameterizations/
 custom4<-function(n,theta,Lambda,D=length(theta)){
@@ -274,8 +324,14 @@ ext_gamma_sampler <- function(alpha, gam_param,truncation=NULL){
 #### main function ####
 Blockg.lm <- function(x,y,
                       grp_idx=NULL,
+                      adaptive=TRUE,
+                      K=50, # Max number of mixture components 
                       burn=10000,
                       nmc=9000,
+                      a_BNP=1, # hyperparameter for the nonparametric process (DP vs PY)
+                               # a_BNP==0 implies fully Bayesian with a gamma(1,1) prior on a_BNP
+                      a_a_BNP = 1, #hyperparameter for the nonparametric process (DP vs PY)
+                      b_a_BNP = 1, #hyperparameter for the nonparametric process (DP vs PY)
                       thinning=10, 
                       model.prior="beta-binomial",
                       hyper.prior="Inv-gamma", # "hyper-g", "hyper-g-n",
@@ -285,12 +341,26 @@ Blockg.lm <- function(x,y,
   n <- length(y)
   p <- ncol(x)
   
-  if(!is.null(grp_idx)){
+  if(is.null(grp_idx)){
+    if(adaptive==FALSE){
+      stop("Either the argument grp_idx should be provided, or adaptive should be set to TRUE")
+    }
+    grp_idx <- rep(1,p)
     #Store useful quantites
     grp_size <- as.vector(table(grp_idx))
     grp_size_cs <- cumsum(grp_size)
     group_ids = unique(grp_idx)
-    K = length(group_ids)
+    K0 = length(group_ids)
+    
+  }else if(!is.null(grp_idx)){
+    #Store useful quantites
+    grp_size <- as.vector(table(grp_idx))
+    grp_size_cs <- cumsum(grp_size)
+    group_ids = unique(grp_idx)
+    K0 = length(group_ids)
+    if(adaptive==FALSE){
+      K=K0
+    }
     
     if(length(grp_idx) != p) {
       stop("The argument grp_idx must have length p, where p in the number of columns in X.")
@@ -300,6 +370,11 @@ Blockg.lm <- function(x,y,
       stop("Groups skip a number somewhere in grp_idx. Ensure that grp_idx is an ordered sequence
          from 1 to p with no skips. A valid example is 1,1,1,2,2,3,3,3,4,5,5.")
     }
+  }
+  random <- F
+  if(adaptive & a_BNP==0){
+    a_BNP  <- rgamma(1,a_a_BNP,b_a_BNP)
+    random <- T
   }
   
   
@@ -380,7 +455,8 @@ Blockg.lm <- function(x,y,
   logBF212Save <- matrix(NA,nmc,1)
   logmargSave <- matrix(NA,nmc,1)
   gvalSave <- matrix(NA, nmc, p)
-  timemat <- matrix(NA, nmc*thinning+burn, 4)
+  grpidSave <- matrix(NA,nmc,p)
+  timemat <- matrix(NA, nmc*thinning+burn, 5)
   xtx.full <- t(x)%*% x
   # Intialize parameters
   gam = rep(0,p)
@@ -390,7 +466,9 @@ Blockg.lm <- function(x,y,
   g_K <- rep(g.old,K)
   g <- rep(g.old, p)#rinvgamma(p, 1/2, n/2)
   sigma2 <- 1
-  
+  # Should I start from random cluster probability or just with one cluster so clust_prob is c(1, rep(0,K-1))
+  stick <- stick_break(K,1,a_BNP,log = TRUE)
+  lclust_prob <- stick$p
   
   #### MCMC Iteration loop ####
   for(t in 1:(nmc*thinning+burn)){
@@ -499,6 +577,44 @@ Blockg.lm <- function(x,y,
     sigma2 <- rinvgamma(1, (n-1)/2, sig2rate/2)
     
     timemat[t,3] <- end_time-start_time
+    
+    
+    #### Update grp_idx (1,..p) ####
+    start_time <- Sys.time()
+    if(adaptive==TRUE){
+      # lclust_prob stores log of prior probability of being in that cluster
+      # Update grp_idx and update K0 save updated grp_idx in grpidSave (later when saving iterations)
+      grp_idx[gam==0] <- rcatlp(sum(gam==0),log_prob=lclust_prob) +1 #(indexing from 0)
+      g <- g_K[grp_idx]
+      var_in_mod <- which(gam==1)
+      pgam <- length(var_in_mod)
+      if(pgam!=0){
+        #print(length(b))
+        for (r in 1:pgam){
+          ind.var <- var_in_mod[r]
+          likl_cluster <- sapply(1:K, cluster_prop_llikelihood, b, xtx, g, gam, sigma2, g_K,r)
+          post_lclust_prob <- lclust_prob + likl_cluster
+          grp_idx[ind.var] <- rcatlp(1,log_prob = post_lclust_prob) +1 # indexing from 0
+          g <- g_K[grp_idx]
+        }
+      }
+      group_ids = unique(grp_idx)
+      K0 = length(group_ids)
+      # Update clust_prob (stick breaking probability using a beta distribution)
+      n_k <- count_subjects(K, grp_idx)
+      stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
+      lclust_prob <- stick$p
+      
+      # Update a_BNP if random ==TRUE
+      if(random==TRUE){
+        a_BNP <- sample_Plambda_posterior(1, stick$q, alpha0 = a_a_BNP,beta0 = b_a_BNP)  
+      }
+      
+    }
+    end_time <- Sys.time()
+    timemat[t,4] <- end_time-start_time
+    
+    
     
     #### Update g ####
     start_time <- Sys.time()
@@ -629,7 +745,7 @@ Blockg.lm <- function(x,y,
     }
     
     end_time <- Sys.time()
-    timemat[t,4] <- end_time-start_time
+    timemat[t,5] <- end_time-start_time
     
     betastore=rep(0,p)
     #Save results post burn-in
@@ -651,6 +767,7 @@ Blockg.lm <- function(x,y,
       Sigma2Save[rr, ] <- sigma2
       logmargSave[rr, ] <- logmarg
       gvalSave[rr, ] <- g
+      grpidSave[rr, ] <- grp_idx
       logBF212Save[rr, ] <- logbf21
     }
   }
