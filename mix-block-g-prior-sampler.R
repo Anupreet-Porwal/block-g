@@ -467,12 +467,19 @@ Blockg.lm <- function(x,y,
   g_K <- rep(g.old,K)
   g <- rep(g.old, p)#rinvgamma(p, 1/2, n/2)
   sigma2 <- 1
-  
+  # if DP.inference == "Dir"
+  eta <- rbeta(1,1,1)
   # Update clust_prob (stick breaking probability using a beta distribution)
   n_k <- count_subjects(K, grp_idx)
   
-  stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
-  lclust_prob <- stick$p
+  
+  
+  if(DP.inference=="SB"){
+    stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
+    lclust_prob <- stick$p
+  }else if(DP.inference=="Dir"){
+    lclust_prob <- log(rdirichlet(K,rep(a_BNP/K,K)+n_k))
+  }
   
   
   # # Should I start from random cluster probability or just with one cluster so clust_prob is c(1, rep(0,K-1))
@@ -609,14 +616,35 @@ Blockg.lm <- function(x,y,
       }
       group_ids = unique(grp_idx)
       K0 = length(group_ids)
+      #K0_in_mod= length(unique(grp_idx[as.logical(gam)]))
       # Update clust_prob (stick breaking probability using a beta distribution)
       n_k <- count_subjects(K, grp_idx)
-      stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
-      lclust_prob <- stick$p
+      
+      if(DP.inference=="SB"){
+        stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
+        lclust_prob <- stick$p
+      }else{
+        lclust_prob <- log(rdirichlet(K,rep(a_BNP/K,K)+n_k))
+      }
       
       # Update a_BNP if random ==TRUE
       if(random==TRUE){
-        a_BNP <- sample_Plambda_posterior(1, stick$q, alpha0 = a_a_BNP,beta0 = b_a_BNP)  
+        if(DP.inference=="SB"){
+          a_BNP <- sample_Plambda_posterior(1, stick$q, alpha0 = a_a_BNP,beta0 = b_a_BNP)
+        }else if(DP.inference=="Dir"){
+          # Use Escobar and West 1995 paper section 6
+          
+          # Sample a_BNP
+          z1 <- rcatlp(1, log_prob = c(log(a_a_BNP+K0-1),log(p)+log(b_a_BNP-log(eta))))
+          if(z1==0){
+            a_BNP <- rgamma(1, a_a_BNP + K0, b_a_BNP - log(eta))
+          }else{
+            a_BNP <- rgamma(1, a_a_BNP + K0 -1 , b_a_BNP - log(eta))
+          }          
+          #Sample eta
+          eta <- rbeta(1,a_BNP+1, pgam)
+        }
+          
       }
       
     }
