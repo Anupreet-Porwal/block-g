@@ -328,7 +328,7 @@ Blockg.lm <- function(x,y,
                       K=50, # Max number of mixture components 
                       burn=10000,
                       nmc=9000,
-                      a_BNP=1, # hyperparameter for the nonparametric process (DP vs PY)
+                      a_BNP=0, # hyperparameter for the nonparametric process (DP vs PY)
                                # a_BNP==0 implies fully Bayesian with a gamma(1,1) prior on a_BNP
                       a_a_BNP = 1, #hyperparameter for the nonparametric process (DP vs PY)
                       b_a_BNP = 1, #hyperparameter for the nonparametric process (DP vs PY)
@@ -336,7 +336,8 @@ Blockg.lm <- function(x,y,
                       model.prior="beta-binomial",
                       hyper.prior="Inv-gamma", # "hyper-g", "hyper-g-n",
                       # "beta-prime-MG","beta-prime"
-                      hyper.param=NULL){
+                      hyper.param=NULL,
+                      DP.inference=NULL){ # can be SB, Dir, condDir
   
   n <- length(y)
   p <- ncol(x)
@@ -466,9 +467,17 @@ Blockg.lm <- function(x,y,
   g_K <- rep(g.old,K)
   g <- rep(g.old, p)#rinvgamma(p, 1/2, n/2)
   sigma2 <- 1
-  # Should I start from random cluster probability or just with one cluster so clust_prob is c(1, rep(0,K-1))
-  stick <- stick_break(K,1,a_BNP,log = TRUE)
+  
+  # Update clust_prob (stick breaking probability using a beta distribution)
+  n_k <- count_subjects(K, grp_idx)
+  
+  stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
   lclust_prob <- stick$p
+  
+  
+  # # Should I start from random cluster probability or just with one cluster so clust_prob is c(1, rep(0,K-1))
+  # stick <- stick_break(K,1,a_BNP,log = TRUE)
+  # lclust_prob <- stick$p
   
   #### MCMC Iteration loop ####
   for(t in 1:(nmc*thinning+burn)){
@@ -776,6 +785,7 @@ Blockg.lm <- function(x,y,
   result <- list("BetaSamples"=BetaSave,
                  "GammaSamples"=GammaSave,
                  "Sigma2Samples"=Sigma2Save,
+                 "grpid"=grpidSave,
                  "gsamples"=gvalSave,
                  "logBF21"=logBF212Save,
                  "timemat"=timemat)
