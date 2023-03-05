@@ -642,7 +642,7 @@ Blockg.lm <- function(x,y,
             a_BNP <- rgamma(1, a_a_BNP + K0 -1 , b_a_BNP - log(eta))
           }          
           #Sample eta
-          eta <- rbeta(1,a_BNP+1, pgam)
+          eta <- rbeta(1,a_BNP+1, p)
         }
           
       }
