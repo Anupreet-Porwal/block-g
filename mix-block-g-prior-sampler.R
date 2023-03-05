@@ -616,7 +616,7 @@ Blockg.lm <- function(x,y,
       }
       group_ids = unique(grp_idx)
       K0 = length(group_ids)
-      #K0_in_mod= length(unique(grp_idx[as.logical(gam)]))
+      K0_in_mod= length(unique(grp_idx[as.logical(gam)]))
       # Update clust_prob (stick breaking probability using a beta distribution)
       n_k <- count_subjects(K, grp_idx)
       
@@ -633,16 +633,19 @@ Blockg.lm <- function(x,y,
           a_BNP <- sample_Plambda_posterior(1, stick$q, alpha0 = a_a_BNP,beta0 = b_a_BNP)
         }else if(DP.inference=="Dir"){
           # Use Escobar and West 1995 paper section 6
-          
-          # Sample a_BNP
-          z1 <- rcatlp(1, log_prob = c(log(a_a_BNP+K0-1),log(p)+log(b_a_BNP-log(eta))))
-          if(z1==0){
-            a_BNP <- rgamma(1, a_a_BNP + K0, b_a_BNP - log(eta))
+          if(pgam!=0){
+            # Sample a_BNP
+            z1 <- rcatlp(1, log_prob = c(log(a_a_BNP+K0_in_mod-1),log(pgam)+log(b_a_BNP-log(eta))))
+            if(z1==0){
+              a_BNP <- rgamma(1, a_a_BNP + K0_in_mod, b_a_BNP - log(eta))
+            }else{
+              a_BNP <- rgamma(1, a_a_BNP + K0_in_mod -1 , b_a_BNP - log(eta))
+            }          
+            #Sample eta
+            eta <- rbeta(1,a_BNP+1, pgam)
           }else{
-            a_BNP <- rgamma(1, a_a_BNP + K0 -1 , b_a_BNP - log(eta))
-          }          
-          #Sample eta
-          eta <- rbeta(1,a_BNP+1, p)
+            a_BNP <- rgamma(1,a_a_BNP,b_a_BNP)
+          }
         }
           
       }
