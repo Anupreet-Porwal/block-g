@@ -201,21 +201,17 @@ gamma_rejection_sampler <- function(alpha, gam_param,truncation=NULL){
       
       t <- rgamma(1,shape = alpha, rate = delta0)
       u <- runif(1) # MADE A CHANGE IN WHILE CONDITION extra alpha 
-      c <- 1
       while (log(u) > alpha -t*(1-delta0)-2*sqrt(t)*gam_param-alpha/delta0){
         t <- rgamma(1,shape = alpha, rate = delta0)
         u <- runif(1)
-        c=c+1
       }
     }else{
       t <- rgamma(1,alpha,1)
       u <- runif(1) # log(u) > -2gamma*sqrt(t)
-      c=1
       while (log(u)> -2*gam_param*sqrt(t)) {
 
         t <- rgamma(1,alpha,1)
         u <- runif(1)
-        c=c+1
       }
     }
     
@@ -226,21 +222,19 @@ gamma_rejection_sampler <- function(alpha, gam_param,truncation=NULL){
       
       t <- rtgamma(1,shape = alpha, rate = delta0,truncation = truncation)
       u <- runif(1) # made a change here in while loop
-      c=1
+      
       while (log(u) > alpha-t*(1-delta0)-2*sqrt(t)*gam_param-alpha/delta0){
 
         t <- rtgamma(1,shape = alpha, rate = delta0,truncation = truncation)
         u <- runif(1)
-        c=c+1
       }
     }else{
       t <- rtgamma(1,shape=alpha,rate=1,truncation = truncation)
       u <- runif(1) # made a change here in while loop condition
-      c=1
+      
       while (log(u)> -2*gam_param*sqrt(t)) {
         t <- rtgamma(1,shape=alpha,rate=1,truncation=truncation)
         u <- runif(1)
-        c=c+1
       }
     }
     
@@ -264,20 +258,18 @@ normal_rejection_sampler <- function(alpha,gam_param,truncation=NULL){
   if(is.null(truncation)){
     x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0)
     u <- runif(1)
-    c=1
+    
     while ((2*alpha-1)*log(m)+ log(u) >(2*alpha-1)*log(x)-2*(m+gam_param)*(x-m)) {
       x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0)
       u <- runif(1)
-      c=c+1
     }
   }else{
     x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0, b=sqrt(truncation))
     u <- runif(1)
-    c=1
+    
     while ((2*alpha-1)*log(m)+ log(u) > (2*alpha-1)*log(x)-2*(m+gam_param)*(x-m)) {
       x <- rtruncnorm(1,mean=m,sd=1/sqrt(2),a=0, b=sqrt(truncation))
       u <- runif(1)
-      c=c+1
       #print(x)
     }
     
@@ -297,20 +289,18 @@ gamma_rs_sqrt_scale <- function(alpha, gam_param,truncation=NULL){
   if(is.null(truncation)){
     x <- rgamma(1,r,delta1)
     u <- runif(1)
-    c=1
+    
     while (log(u)>-(x-(delta1/2-gam_param))^2) {
       x <- rgamma(1,r,delta1)
       u <- runif(1)
-      c=c+1
     }
   }else{
     x <- rtgamma(1,shape=r,rate=delta1,truncation = sqrt(truncation))
     u <- runif(1)
-    c=1
+    
     while (log(u)>-(x-(delta1/2-gam_param))^2) {
       x <- rtgamma(1,shape=r,rate=delta1,truncation = sqrt(truncation))
       u <- runif(1)
-      c <- c+1
     }
     
   }
@@ -492,6 +482,7 @@ Blockg.lm <- function(x,y,
     stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
     lclust_prob <- stick$p
   }else if(DP.inference=="Dir"){
+    
     lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))
   }
   
@@ -638,6 +629,7 @@ Blockg.lm <- function(x,y,
         stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
         lclust_prob <- stick$p
       }else{
+        
         lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))
       }
       
