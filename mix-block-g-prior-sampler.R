@@ -6,7 +6,7 @@ library(extraDistr)
 library(dirichletprocess)
 resample <- function(x, ...) x[sample.int(length(x), ...)]
 
-cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r){
+cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r,prior.corr){
   var_in_mod <- which(gam==1)
   ind.var <- var_in_mod[r]
   g[ind.var] <- g_K[k]
@@ -16,8 +16,12 @@ cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r){
   # CHECK THIS EQUATION IS CORRECT
   #print(dim(xtx[r,-r]))
   #print(dim(b_sqrtg[-r]))
-  d_ind <- 2* (xtx[r,-r] %*% b_sqrtg[1,-r])*b[r]/sqrt(ggam[r]) + 
-    xtx[r,r] * b[r]^2/ggam[r]
+  if(prior.corr==TRUE){
+    d_ind <- 2* (xtx[r,-r] %*% b_sqrtg[1,-r])*b[r]/sqrt(ggam[r]) + 
+      xtx[r,r] * b[r]^2/ggam[r]
+  }else{
+    d_ind <- b[r]^2/ggam[r]
+  }
   prop_llik <- -0.5*log(ggam[r]) - d_ind/(2*sigma2)
   
   return(prop_llik)
@@ -27,10 +31,14 @@ cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r){
 # Taken from: https://github.com/IvanUkhov/blog/blob/main/_scripts/2021-01-25-dirichlet-process/common.R
 # blog post: https://blog.ivanukhov.com/2021/01/25/dirichlet-process.html
 count_subjects <- function(m, k) {
+
   n <- rep(0, m)
+  if(length(k)==0){
+   return(n) 
+  }
   k <- as.data.frame(table(k))
   n[as.numeric(levels(k[ , 1]))[k[ , 1]]] <- k[ , 2]
-  n
+  return (n)
 }
 
 stick_break <- function(l, alpha, beta,log=TRUE) {
@@ -137,7 +145,7 @@ to_right_Matrix <- function(x) {
   }
 }
 
-log_marginal <- function(x,y,g,gam,hyper.prior){
+log_marginal <- function(x,y,g,gam,hyper.prior,prior.corr){
   
   n <- length(y)
   p <- ncol(x)
@@ -159,12 +167,22 @@ log_marginal <- function(x,y,g,gam,hyper.prior){
     if(hyper.prior=="beta-prime-MG"){
       ghalf <- diag(sqrt(g),nrow = pgam,ncol=pgam)
       xghalf <- x %*% ghalf
-      mat <- WoodburyMatrix(A=diag(n), X= xghalf, B=xtx)
+      if(prior.corr==TRUE){
+        mat <- WoodburyMatrix(A=diag(n), X= xghalf, B=xtx)
+      }else{
+        mat <- WoodburyMatrix(A=diag(n), X= xghalf, B=diag(pgam))
+      }
+      
     }else{
       ghalf.inv <- diag(1/sqrt(g),nrow = pgam,ncol=pgam)
       # print(paste("min:",min(g)))
       # print(paste("max:",max(g)))
-      gxtxg <- ghalf.inv %*% xtx %*% ghalf.inv
+      if(prior.corr==TRUE){
+        gxtxg <- ghalf.inv %*% xtx %*% ghalf.inv  
+      }else{
+        gxtxg <- diag(1/g,nrow = pgam,ncol=pgam)
+      }
+      
       gxtxg <- (gxtxg+t(gxtxg))/2
       # temp <- solve(xtx+gxtxg)
       # print(isSymmetric(temp))
@@ -341,16 +359,33 @@ Blockg.lm <- function(x,y,
                       hyper.prior="Inv-gamma", # "hyper-g", "hyper-g-n",
                       # "beta-prime-MG","beta-prime"
                       hyper.param=NULL,
-                      DP.inference=NULL){ # can be SB, Dir, condDir
+                      DP.inference=NULL, # can be SB, Dir, condDir
+                      prior.corr=TRUE,
+                      model=NULL){ 
   
   n <- length(y)
   p <- ncol(x)
+  
+  if(prior.corr==TRUE & !is.null(model)){
+    if(sum(model)>=n-1){
+      stop("xtx inverse in g prior is not defined for p>n case. 
+           Select model such that model size is <n-1.")
+    }
+  }
+  
+  if(adaptive==TRUE & is.null(DP.inference)){
+    DP.inference="Dir"  
+  }
   
   if(is.null(grp_idx)){
     if(adaptive==FALSE){
       stop("Either the argument grp_idx should be provided, or adaptive should be set to TRUE")
     }
-    grp_idx <- rep(1,p)
+    if(is.null(model)){
+      grp_idx <- rep(1,p)
+    }else{
+      grp_idx <- rep(1,sum(model))
+    }
     #Store useful quantites
     grp_size <- as.vector(table(grp_idx))
     grp_size_cs <- cumsum(grp_size)
@@ -366,8 +401,7 @@ Blockg.lm <- function(x,y,
     if(adaptive==FALSE){
       K=K0
     }
-    
-    if(length(grp_idx) != p) {
+    if(length(grp_idx) != p){
       stop("The argument grp_idx must have length p, where p in the number of columns in X.")
     }
     
@@ -458,38 +492,45 @@ Blockg.lm <- function(x,y,
   BetaSave = matrix(NA, nmc, p+1)
   Sigma2Save <- matrix(NA, nmc, 1)
   logBF212Save <- matrix(NA,nmc,1)
+  nclusterSave <- matrix(NA,nmc,1)
   logmargSave <- matrix(NA,nmc,1)
   gvalSave <- matrix(NA, nmc, p)
   grpidSave <- matrix(NA,nmc,p)
   timemat <- matrix(NA, nmc*thinning+burn, 5)
   xtx.full <- t(x)%*% x
   # Intialize parameters
-  gam = rep(0,p)
-  alpha <- mean(y)
-  b <- rep(0, p)
   g.old <- n
   g_K <- rep(g.old,K)
+  
+  if(!is.null(model)){
+    gam <- model
+    pgam <- sum(gam)
+    b <- rep(0,pgam)
+    
+  }else{
+    gam = rep(0,p)  
+    b <- rep(0, p)
+  }
+  
   g <- rep(g.old, p)#rinvgamma(p, 1/2, n/2)
+  alpha <- mean(y)
   sigma2 <- 1
   # if DP.inference == "Dir"
   eta <- rbeta(1,1,1)
   # Update clust_prob (stick breaking probability using a beta distribution)
-  n_k <- count_subjects(K, grp_idx)
+  #n_k <- count_subjects(K, grp_idx)
+  n_k <- count_subjects(K, grp_idx[as.logical(gam)])
   
   
-  
-  if(DP.inference=="SB"){
-    stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
-    lclust_prob <- stick$p
-  }else if(DP.inference=="Dir"){
-    
-    lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))
+  if(adaptive==TRUE){
+    if(DP.inference=="SB"){
+      stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
+      lclust_prob <- stick$p
+    }else if(DP.inference=="Dir"){
+      lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))
+    }
   }
   
-  
-  # # Should I start from random cluster probability or just with one cluster so clust_prob is c(1, rep(0,K-1))
-  # stick <- stick_break(K,1,a_BNP,log = TRUE)
-  # lclust_prob <- stick$p
   
   #### MCMC Iteration loop ####
   for(t in 1:(nmc*thinning+burn)){
@@ -498,70 +539,86 @@ Blockg.lm <- function(x,y,
     
     #### Update Gamma####
     start_time <- Sys.time()
-    # Propose gamma
-    gam.prop <- proposal.gamma(gam)
+    if(is.null(model)){
     
-    if(sum(gam.prop)< n-1){
-      logmarg.prop.obj <- log_marginal(x,y,g,gam.prop,hyper.prior=hyper.prior)
-    }
-    logmarg.curr.obj <- log_marginal(x,y,g, gam,hyper.prior=hyper.prior)
-    # Calculate acceptance probability for (gam.prop,delta.cand)
-    
-    if(p==2){
-      m2 <- c(1,1)
-      m1 <- c(1,0)
-      logmarg.m2.obj <- log_marginal(x,y,g,m2)
-      logmarg.m1.obj <- log_marginal(x,y,g,m1)
-      logbf21 <- logmarg.m2.obj$logmg - (logmarg.m1.obj$logmg)
-    }else{
-      logbf21 <- NA
-    }
-    
-    
-    # under beta-binomial
-    if(model.prior=="beta-binomial"){
-      if(sum(gam.prop)<n-1){
-        oj.num.log <- -lchoose(p,sum(gam.prop)) + logmarg.prop.obj$logmg  
-      }else{
-        oj.num.log <- -Inf
-      }
-      oj.den.log <-  -lchoose(p,sum(gam))+logmarg.curr.obj$logmg
+      # Propose gamma
+      gam.prop <- proposal.gamma(gam)
       
-      # logbf21 <- logmarg.m2.obj$logmg - (logmarg.m1.obj$logmg)
-    }else if (model.prior=="Uniform"){ # Under Uniform model prior
-      # define oj.num.log and oj.den.log
-      if(sum(gam.prop)<n-1){
-        oj.num.log <- logmarg.prop.obj$logmg  
+      if(sum(gam.prop)< n-1){
+        logmarg.prop.obj <- log_marginal(x,y,g,gam.prop,hyper.prior=hyper.prior,
+                                         prior.corr=prior.corr)
+      }
+      logmarg.curr.obj <- log_marginal(x,y,g, gam,hyper.prior=hyper.prior,
+                                       prior.corr=prior.corr)
+      # Calculate acceptance probability for (gam.prop,delta.cand)
+      
+      if(p==2){
+        m2 <- c(1,1)
+        m1 <- c(1,0)
+        logmarg.m2.obj <- log_marginal(x,y,g,m2,hyper.prior=hyper.prior,
+                                       prior.corr=prior.corr)
+        logmarg.m1.obj <- log_marginal(x,y,g,m1,hyper.prior=hyper.prior,
+                                       prior.corr=prior.corr)
+        logbf21 <- logmarg.m2.obj$logmg - (logmarg.m1.obj$logmg)
       }else{
-        oj.num.log <- -Inf
+        logbf21 <- NA
       }
       
-      oj.den.log <- logmarg.curr.obj$logmg
-      # logbf21 <- logmarg.m2.obj$logmg - logmarg.m1.obj$logmg
-    }
-    
-    u.gam <- runif(1)
-    
-    #print(paste("Iteration",t,":", as.numeric(exp(oj.num.log-oj.den.log)),sep = ""))  
-    
-    
-    #print(oj.den.log)
-    loga.gam.prob <- min(as.numeric(oj.num.log-oj.den.log),0)
-    if(log(u.gam)<=loga.gam.prob){
-      gam <- gam.prop
-      xtx <- logmarg.prop.obj$xtx
-      xty <- logmarg.prop.obj$xty
-      ggam <- logmarg.prop.obj$ggam
-      sig2rate <- logmarg.prop.obj$sig2rate
-      logmarg <- logmarg.prop.obj$logmg
+      
+      # under beta-binomial
+      if(model.prior=="beta-binomial"){
+        if(sum(gam.prop)<n-1){
+          oj.num.log <- -lchoose(p,sum(gam.prop)) + logmarg.prop.obj$logmg  
+        }else{
+          oj.num.log <- -Inf
+        }
+        oj.den.log <-  -lchoose(p,sum(gam))+logmarg.curr.obj$logmg
+        
+        # logbf21 <- logmarg.m2.obj$logmg - (logmarg.m1.obj$logmg)
+      }else if (model.prior=="Uniform"){ # Under Uniform model prior
+        # define oj.num.log and oj.den.log
+        if(sum(gam.prop)<n-1){
+          oj.num.log <- logmarg.prop.obj$logmg  
+        }else{
+          oj.num.log <- -Inf
+        }
+        
+        oj.den.log <- logmarg.curr.obj$logmg
+        # logbf21 <- logmarg.m2.obj$logmg - logmarg.m1.obj$logmg
+      }
+      
+      u.gam <- runif(1)
+      
+      #print(paste("Iteration",t,":", as.numeric(exp(oj.num.log-oj.den.log)),sep = ""))  
+      
+      
+      #print(oj.den.log)
+      loga.gam.prob <- min(as.numeric(oj.num.log-oj.den.log),0)
+      if(log(u.gam)<=loga.gam.prob){
+        gam <- gam.prop
+        xtx <- logmarg.prop.obj$xtx
+        xty <- logmarg.prop.obj$xty
+        ggam <- logmarg.prop.obj$ggam
+        sig2rate <- logmarg.prop.obj$sig2rate
+        logmarg <- logmarg.prop.obj$logmg
+      }else{
+        gam <- gam
+        xtx <- logmarg.curr.obj$xtx
+        xty <- logmarg.curr.obj$xty
+        ggam <- logmarg.curr.obj$ggam
+        sig2rate <- logmarg.curr.obj$sig2rate
+        logmarg <- logmarg.curr.obj$logmg
+      }
     }else{
+      logmarg.obj <- log_marginal(x,y,g,gam, hyper.prior=hyper.prior,
+                                       prior.corr=prior.corr)
       gam <- gam
-      xtx <- logmarg.curr.obj$xtx
-      xty <- logmarg.curr.obj$xty
-      ggam <- logmarg.curr.obj$ggam
-      sig2rate <- logmarg.curr.obj$sig2rate
-      logmarg <- logmarg.curr.obj$logmg
-      
+      xtx <- logmarg.obj$xtx
+      xty <- logmarg.obj$xty
+      ggam <- logmarg.obj$ggam
+      sig2rate <- logmarg.obj$sig2rate
+      logmarg <- logmarg.obj$logmg
+      logbf21 <- NA
     }
     end_time <- Sys.time()
     timemat[t,1] <- end_time-start_time
@@ -579,7 +636,12 @@ Blockg.lm <- function(x,y,
       ggam_inv_half <- diag(1/sqrt(ggam),nrow = pgam,ncol = pgam) 
       #print(min(ggam))
       #print(max(ggam))
-      prec.mat <- ggam_inv_half %*% xtx %*% ggam_inv_half + xtx
+      if(prior.corr==TRUE){
+        prec.mat <- ggam_inv_half %*% xtx %*% ggam_inv_half + xtx  
+      }else{
+        prec.mat <- diag(1/ggam,nrow = pgam,ncol = pgam) + xtx
+      }
+      
       # covariance matrix is inverse of 1/sigma2*prec.mat and 
       # mean is cov matrix multiplied by xty/sigma^2 so that sigma2 cancel out in mean
       b <- custom4(1,1/sigma2*xty,1/sigma2*prec.mat)
@@ -613,7 +675,7 @@ Blockg.lm <- function(x,y,
         #print(length(b))
         for (r in 1:pgam){
           ind.var <- var_in_mod[r]
-          likl_cluster <- sapply(1:K, cluster_prop_llikelihood, b, xtx, g, gam, sigma2, g_K,r)
+          likl_cluster <- sapply(1:K, cluster_prop_llikelihood, b, xtx, g, gam, sigma2, g_K,r,prior.corr)
           post_lclust_prob <- lclust_prob + likl_cluster
           grp_idx[ind.var] <- rcatlp(1,log_prob = post_lclust_prob) +1 # indexing from 0
           g <- g_K[grp_idx]
@@ -623,13 +685,13 @@ Blockg.lm <- function(x,y,
       K0 = length(group_ids)
       K0_in_mod= length(unique(grp_idx[as.logical(gam)]))
       # Update clust_prob (stick breaking probability using a beta distribution)
-      n_k <- count_subjects(K, grp_idx)
+      n_k <- count_subjects(K, grp_idx[as.logical(gam)])
+      #n_k <- count_subjects(K, grp_idx)
       
       if(DP.inference=="SB"){
         stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
         lclust_prob <- stick$p
       }else{
-        
         lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))
       }
       
@@ -646,12 +708,21 @@ Blockg.lm <- function(x,y,
               a_BNP <- rgamma(1, a_a_BNP + K0_in_mod, b_a_BNP - log(eta))
             }else{
               a_BNP <- rgamma(1, a_a_BNP + K0_in_mod -1 , b_a_BNP - log(eta))
-            }          
+            }
             #Sample eta
             eta <- rbeta(1,a_BNP+1, pgam)
           }else{
             a_BNP <- rgamma(1,a_a_BNP,b_a_BNP)
           }
+          # Sample a_BNP
+          # z1 <- rcatlp(1, log_prob = c(log(a_a_BNP+K0-1),log(p)+log(b_a_BNP-log(eta))))
+          # if(z1==0){
+          #   a_BNP <- rgamma(1, a_a_BNP + K0, b_a_BNP - log(eta))
+          # }else{
+          #   a_BNP <- rgamma(1, a_a_BNP + K0 -1 , b_a_BNP - log(eta))
+          # }
+          #Sample eta
+          #eta <- rbeta(1,a_BNP+1, p)
         }
           
       }
@@ -672,8 +743,15 @@ Blockg.lm <- function(x,y,
       bvec <- as.vector(b)
       bvec.full <- rep(0,p)
       bvec.full[which(gam==1)] <- bvec
-      C <- (2*sigma2)^{-1}* diag(bvec.full,nrow=length(bvec.full),ncol = length(bvec.full)) %*% xtx.full %*% 
-        diag(bvec.full, nrow=length(bvec.full),ncol = length(bvec.full))
+      if(prior.corr==TRUE){
+        C <- (2*sigma2)^{-1}* diag(bvec.full,nrow=length(bvec.full),ncol = 
+                                     length(bvec.full)) %*% xtx.full %*% 
+          diag(bvec.full, nrow=length(bvec.full),ncol = length(bvec.full))
+        
+      }else{
+        C <- (2*sigma2)^{-1}* diag(bvec.full^2,nrow=length(bvec.full),ncol = 
+                                     length(bvec.full))
+      }
     }
 
     for(k in 1:K){
@@ -691,7 +769,9 @@ Blockg.lm <- function(x,y,
             d_k <- 0
         }else{
           c_k <- sum(C[grp_mem_in_mod,grp_mem_in_mod])
-          d_k <- sum(2*C[grp_mem_in_mod,-grp_mem_in_mod]%*%(1/sqrt(g[-grp_mem_in_mod])))
+          d_k <- sum(2*C[grp_mem_in_mod,-grp_mem_in_mod]%*% 
+                       diag(1/sqrt(g[-grp_mem_in_mod]),nrow = 
+                              p-length(grp_mem_in_mod)))
         }
         
         # sample g_k from that distribution using slice + rejection sampling
@@ -811,6 +891,7 @@ Blockg.lm <- function(x,y,
       betastore <- c(alpha,betastore)
       BetaSave[rr, ] = betastore
       Sigma2Save[rr, ] <- sigma2
+      nclusterSave[rr, ] <- K0_in_mod
       logmargSave[rr, ] <- logmarg
       gvalSave[rr, ] <- g
       grpidSave[rr, ] <- grp_idx
