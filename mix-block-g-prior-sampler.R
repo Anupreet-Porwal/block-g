@@ -891,7 +891,11 @@ Blockg.lm <- function(x,y,
       betastore <- c(alpha,betastore)
       BetaSave[rr, ] = betastore
       Sigma2Save[rr, ] <- sigma2
-      nclusterSave[rr, ] <- K0_in_mod
+      if(adaptive){
+        nclusterSave[rr, ] <- K0_in_mod
+      }else{
+        nclusterSave[rr, ] <- K0
+      }
       logmargSave[rr, ] <- logmarg
       gvalSave[rr, ] <- g
       grpidSave[rr, ] <- grp_idx
@@ -903,6 +907,7 @@ Blockg.lm <- function(x,y,
   result <- list("BetaSamples"=BetaSave,
                  "GammaSamples"=GammaSave,
                  "Sigma2Samples"=Sigma2Save,
+                 "ncluster"=nclusterSave,
                  "grpid"=grpidSave,
                  "gsamples"=gvalSave,
                  "logBF21"=logBF212Save,
