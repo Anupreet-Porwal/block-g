@@ -356,6 +356,7 @@ Blockg.lm <- function(x,y,
                       b_a_BNP = 1, #hyperparameter for the nonparametric process (DP vs PY)
                       thinning=10, 
                       model.prior="beta-binomial",
+                      model.init=NULL,
                       hyper.prior="Inv-gamma", # "hyper-g", "hyper-g-n",
                       # "beta-prime-MG","beta-prime"
                       hyper.param=NULL,
@@ -503,12 +504,20 @@ Blockg.lm <- function(x,y,
   g_K <- rep(g.old,K)
   
   if(!is.null(model)){
+    if(!is.null(model.init)& !all(model.init==model)){
+      stop("model.init should be same as model or null when model is specified.")
+    }
     gam <- model
     pgam <- sum(gam)
     b <- rep(0,pgam)
     
   }else{
-    gam = rep(0,p)  
+    if(!is.null(model.init)){
+      gam <- model.init
+    }else{
+      gam = rep(0,p)    
+    }
+    
     b <- rep(0, p)
   }
   
