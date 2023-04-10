@@ -355,7 +355,7 @@ Blockg.lm <- function(x,y,
                       a_a_BNP = 1, #hyperparameter for the nonparametric process (DP vs PY)
                       b_a_BNP = 1, #hyperparameter for the nonparametric process (DP vs PY)
                       thinning=10, 
-                      model.prior="beta-binomial",
+                      model.prior="beta-binomial", # uniform, # decaying-beta-binomial 
                       model.init=NULL,
                       hyper.prior="Inv-gamma", # "hyper-g", "hyper-g-n",
                       # "beta-prime-MG","beta-prime"
@@ -594,6 +594,21 @@ Blockg.lm <- function(x,y,
         
         oj.den.log <- logmarg.curr.obj$logmg
         # logbf21 <- logmarg.m2.obj$logmg - logmarg.m1.obj$logmg
+      }else if(model.prior=="decaying-beta-binomial"){
+        if(p<n-1){a.bb <- b.bb <- 1}else{
+          a.bb <- 1
+          k.bb <- (p-n/2)/(log(p)*n/2)
+          b.bb <- k.bb*log(p)
+        }
+        # define oj.num.log and oj.den.log
+        if(sum(gam.prop)<n-1){
+          oj.num.log <- logmarg.prop.obj$logmg + dbbinom(sum(gam.prop), p, a.bb, b.bb,log = TRUE)  
+        }else{
+          oj.num.log <- -Inf
+        }
+        
+        oj.den.log <- logmarg.curr.obj$logmg + dbbinom(sum(gam), p, a.bb, b.bb,log = TRUE) 
+        
       }
       
       u.gam <- runif(1)
