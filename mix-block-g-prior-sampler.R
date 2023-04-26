@@ -347,7 +347,7 @@ ext_gamma_sampler <- function(alpha, gam_param,truncation=NULL){
 Blockg.lm <- function(x,y,
                       grp_idx=NULL,
                       adaptive=TRUE,
-                      K=50, # Max number of mixture components 
+                      K=40, # Max number of mixture components 
                       burn=10000,
                       nmc=9000,
                       a_BNP=0, # hyperparameter for the nonparametric process (DP vs PY)
@@ -731,14 +731,14 @@ Blockg.lm <- function(x,y,
         stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
         lclust_prob <- stick$p
       }else{
+        lclust_prob <- log(rgamma(K, a_BNP/K+n_k,1))
         # if(sum(n_k)==0){
           #Use gamma representation
           #lclust_gam_rep <- rgamma(K, a_BNP/K,1)
           #lclust_prob <- log(lclust_gam_rep)-log(sum(lclust_gam_rep))
-          lclust_prob <- log(rgamma(K, a_BNP/K+n_k,1))
         # }else{
         #   lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))  
-        }
+        #}
       }
       
       # Update a_BNP if random ==TRUE
