@@ -145,7 +145,7 @@ to_right_Matrix <- function(x) {
   }
 }
 
-log_marginal <- function(x,y,g,gam,hyper.prior,prior.corr){
+log_marginal <- function(x,y,g,gam,hyper.prior,prior.corr,tau2){
   
   n <- length(y)
   p <- ncol(x)
@@ -168,9 +168,9 @@ log_marginal <- function(x,y,g,gam,hyper.prior,prior.corr){
       ghalf <- diag(sqrt(g),nrow = pgam,ncol=pgam)
       xghalf <- x %*% ghalf
       if(prior.corr==TRUE){
-        mat <- WoodburyMatrix(A=diag(n), X= xghalf, B=xtx)
+        mat <- WoodburyMatrix(A=diag(n), X= sqrt(tau2)*xghalf, B=xtx)
       }else{
-        mat <- WoodburyMatrix(A=diag(n), X= xghalf, B=diag(pgam))
+        mat <- WoodburyMatrix(A=diag(n), X= sqrt(tau2)*xghalf, B=diag(pgam))
       }
       
     }else{
@@ -182,7 +182,7 @@ log_marginal <- function(x,y,g,gam,hyper.prior,prior.corr){
       }else{
         gxtxg <- diag(1/g,nrow = pgam,ncol=pgam)
       }
-      
+      gxtxg <- gxtxg/tau2
       gxtxg <- (gxtxg+t(gxtxg))/2
       # temp <- solve(xtx+gxtxg)
       # print(isSymmetric(temp))
@@ -359,6 +359,8 @@ Blockg.lm <- function(x,y,
                       model.init=NULL,
                       hyper.prior="Inv-gamma", # "hyper-g", "hyper-g-n",
                       # "beta-prime-MG","beta-prime"
+                      tau2.fixed=FALSE,
+                      tau2=1,
                       hyper.param=NULL,
                       DP.inference=NULL, # can be SB, Dir, condDir
                       prior.corr=TRUE,
@@ -492,12 +494,13 @@ Blockg.lm <- function(x,y,
   GammaSave = matrix(NA, nmc, p)
   BetaSave = matrix(NA, nmc, p+1)
   Sigma2Save <- matrix(NA, nmc, 1)
+  Tau2Save <- matrix(NA, nmc, 1)
   logBF212Save <- matrix(NA,nmc,1)
   nclusterSave <- matrix(NA,nmc,1)
   logmargSave <- matrix(NA,nmc,1)
   gvalSave <- matrix(NA, nmc, p)
   grpidSave <- matrix(NA,nmc,p)
-  timemat <- matrix(NA, nmc*thinning+burn, 5)
+  timemat <- matrix(NA, nmc*thinning+burn, 7)
   xtx.full <- t(x)%*% x
   # Intialize parameters
   g.old <- n
@@ -524,6 +527,8 @@ Blockg.lm <- function(x,y,
   g <- rep(g.old, p)#rinvgamma(p, 1/2, n/2)
   alpha <- mean(y)
   sigma2 <- 1
+  tau2 <- tau2
+  nu <- rinvgamma(1,1/2,1)
   # if DP.inference == "Dir"
   eta <- rbeta(1,1,1)
   # Update clust_prob (stick breaking probability using a beta distribution)
@@ -536,7 +541,15 @@ Blockg.lm <- function(x,y,
       stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
       lclust_prob <- stick$p
     }else if(DP.inference=="Dir"){
-      lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))
+      lclust_prob <- log(rgamma(K,a_BNP/K+n_k,1))
+      # if(sum(n_k)==0){
+      #   #Use gamma representation
+      #   lclust_gam_rep <- rgamma(K, a_BNP/K,1)
+      #   lclust_prob <- log(lclust_gam_rep)-log(sum(lclust_gam_rep))
+      # }else{
+      #   lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))  
+      # }
+      
     }
   }
   
@@ -555,19 +568,19 @@ Blockg.lm <- function(x,y,
       
       if(sum(gam.prop)< n-1){
         logmarg.prop.obj <- log_marginal(x,y,g,gam.prop,hyper.prior=hyper.prior,
-                                         prior.corr=prior.corr)
+                                         prior.corr=prior.corr,tau2)
       }
       logmarg.curr.obj <- log_marginal(x,y,g, gam,hyper.prior=hyper.prior,
-                                       prior.corr=prior.corr)
+                                       prior.corr=prior.corr,tau2)
       # Calculate acceptance probability for (gam.prop,delta.cand)
       
       if(p==2){
         m2 <- c(1,1)
         m1 <- c(1,0)
         logmarg.m2.obj <- log_marginal(x,y,g,m2,hyper.prior=hyper.prior,
-                                       prior.corr=prior.corr)
+                                       prior.corr=prior.corr,tau2)
         logmarg.m1.obj <- log_marginal(x,y,g,m1,hyper.prior=hyper.prior,
-                                       prior.corr=prior.corr)
+                                       prior.corr=prior.corr,tau2)
         logbf21 <- logmarg.m2.obj$logmg - (logmarg.m1.obj$logmg)
       }else{
         logbf21 <- NA
@@ -637,7 +650,7 @@ Blockg.lm <- function(x,y,
       }
     }else{
       logmarg.obj <- log_marginal(x,y,g,gam, hyper.prior=hyper.prior,
-                                       prior.corr=prior.corr)
+                                       prior.corr=prior.corr,tau2)
       gam <- gam
       xtx <- logmarg.obj$xtx
       xty <- logmarg.obj$xty
@@ -663,9 +676,9 @@ Blockg.lm <- function(x,y,
       #print(min(ggam))
       #print(max(ggam))
       if(prior.corr==TRUE){
-        prec.mat <- ggam_inv_half %*% xtx %*% ggam_inv_half + xtx  
+        prec.mat <- (ggam_inv_half %*% xtx %*% ggam_inv_half)/tau2 + xtx  
       }else{
-        prec.mat <- diag(1/ggam,nrow = pgam,ncol = pgam) + xtx
+        prec.mat <- (diag(1/ggam,nrow = pgam,ncol = pgam))/tau2 + xtx
       }
       
       # covariance matrix is inverse of 1/sigma2*prec.mat and 
@@ -718,7 +731,14 @@ Blockg.lm <- function(x,y,
         stick <- stick_break(K, n_k+1, a_BNP + sum(n_k)-cumsum(n_k),log = TRUE)
         lclust_prob <- stick$p
       }else{
-        lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))
+        # if(sum(n_k)==0){
+          #Use gamma representation
+          #lclust_gam_rep <- rgamma(K, a_BNP/K,1)
+          #lclust_prob <- log(lclust_gam_rep)-log(sum(lclust_gam_rep))
+          lclust_prob <- log(rgamma(K, a_BNP/K+n_k,1))
+        # }else{
+        #   lclust_prob <- log(rdirichlet(1,rep(a_BNP/K,K)+n_k))  
+        }
       }
       
       # Update a_BNP if random ==TRUE
@@ -770,12 +790,12 @@ Blockg.lm <- function(x,y,
       bvec.full <- rep(0,p)
       bvec.full[which(gam==1)] <- bvec
       if(prior.corr==TRUE){
-        C <- (2*sigma2)^{-1}* diag(bvec.full,nrow=length(bvec.full),ncol = 
+        C <- (2*sigma2*tau2)^{-1}* diag(bvec.full,nrow=length(bvec.full),ncol = 
                                      length(bvec.full)) %*% xtx.full %*% 
           diag(bvec.full, nrow=length(bvec.full),ncol = length(bvec.full))
         
       }else{
-        C <- (2*sigma2)^{-1}* diag(bvec.full^2,nrow=length(bvec.full),ncol = 
+        C <- (2*sigma2*tau2)^{-1}* diag(bvec.full^2,nrow=length(bvec.full),ncol = 
                                      length(bvec.full))
       }
     }
@@ -898,7 +918,37 @@ Blockg.lm <- function(x,y,
     
     end_time <- Sys.time()
     timemat[t,5] <- end_time-start_time
+
+    if(tau2.fixed==FALSE){
+      start_time <- Sys.time()
+      #### Update tau2 and nu ####
+      if(pgam>0){
+        ggam <- g[as.logical(gam)]
+        ggam_inv_half <- diag(1/sqrt(ggam),nrow = pgam,ncol = pgam) 
+        if(prior.corr==TRUE){
+          tau2rate <- (t(b)%*%(ggam_inv_half %*% xtx %*% ggam_inv_half)%*% b)/(2*sigma2)  
+        }else{
+          tau2rate <- (t(b)%*%(diag(1/ggam,nrow = pgam,ncol = pgam))%*% b)/(2*sigma2)
+        }
+        #print(tau2)
+        tau2 <- 1/rgamma(1, (pgam+1)/2, 1/nu+ tau2rate)
+      }else{
+        tau2 <- 1/rgamma(1, 1/2,1/nu)
+      }
+      end_time <- Sys.time()
+      timemat[t,6] <- end_time-start_time
+      
+      start_time <- Sys.time()
+      
+      nu <- 1/rgamma(1, 1, 1+1/tau2)
+      
+      end_time <- Sys.time()
+      timemat[t,7] <- end_time-start_time
+      
+    }
     
+    
+    #### Store results as a list ####
     betastore=rep(0,p)
     #Save results post burn-in
     if(t > burn && (t - burn) %% thinning == 0){
@@ -917,6 +967,7 @@ Blockg.lm <- function(x,y,
       betastore <- c(alpha,betastore)
       BetaSave[rr, ] = betastore
       Sigma2Save[rr, ] <- sigma2
+      Tau2Save[rr, ] <- tau2
       if(adaptive){
         nclusterSave[rr, ] <- K0_in_mod
       }else{
@@ -929,10 +980,10 @@ Blockg.lm <- function(x,y,
     }
   }
   
-  # Store results as a list
   result <- list("BetaSamples"=BetaSave,
                  "GammaSamples"=GammaSave,
                  "Sigma2Samples"=Sigma2Save,
+                 "Tau2Samples"=Tau2Save,
                  "ncluster"=nclusterSave,
                  "grpid"=grpidSave,
                  "gsamples"=gvalSave,
