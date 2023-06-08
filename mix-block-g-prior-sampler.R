@@ -6,7 +6,8 @@ library(extraDistr)
 library(dirichletprocess)
 resample <- function(x, ...) x[sample.int(length(x), ...)]
 
-cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r,prior.corr){
+cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r,
+                                     prior.corr,tau2){
   var_in_mod <- which(gam==1)
   ind.var <- var_in_mod[r]
   g[ind.var] <- g_K[k]
@@ -22,7 +23,7 @@ cluster_prop_llikelihood <- function(k,b, xtx, g, gam, sigma2, g_K, r,prior.corr
   }else{
     d_ind <- b[r]^2/ggam[r]
   }
-  prop_llik <- -0.5*log(ggam[r]) - d_ind/(2*sigma2)
+  prop_llik <- -0.5*log(ggam[r]) - d_ind/(2*sigma2*tau2)
   
   return(prop_llik)
 }
@@ -557,7 +558,7 @@ Blockg.lm <- function(x,y,
   #### MCMC Iteration loop ####
   for(t in 1:(nmc*thinning+burn)){
     
-    if (t%%100 == 0){cat(paste(t," "))}
+    if (t%%500 == 0){cat(paste(t," "))}
     
     #### Update Gamma####
     start_time <- Sys.time()
@@ -714,7 +715,8 @@ Blockg.lm <- function(x,y,
         #print(length(b))
         for (r in 1:pgam){
           ind.var <- var_in_mod[r]
-          likl_cluster <- sapply(1:K, cluster_prop_llikelihood, b, xtx, g, gam, sigma2, g_K,r,prior.corr)
+          likl_cluster <- sapply(1:K, cluster_prop_llikelihood, b, xtx, g, gam, 
+                                 sigma2, g_K,r,prior.corr,tau2)
           post_lclust_prob <- lclust_prob + likl_cluster
           grp_idx[ind.var] <- rcatlp(1,log_prob = post_lclust_prob) +1 # indexing from 0
           g <- g_K[grp_idx]
